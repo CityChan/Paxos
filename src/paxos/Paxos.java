@@ -2,14 +2,20 @@ package paxos;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.server.UnicastRemoteObject;
 import java.rmi.registry.Registry;
+import java.util.Arrays;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * This class is the main class you need to implement paxos instances.
+ * @param <Instance>
  */
 public class Paxos implements PaxosRMI, Runnable{
+	
 
+    
     ReentrantLock mutex;
     String[] peers; // hostname
     int[] ports; // host port
@@ -22,8 +28,38 @@ public class Paxos implements PaxosRMI, Runnable{
     AtomicBoolean unreliable;// for testing
 
     // Your data here
+    int seq;
+    Map<Integer, Instance> instances;
+    int[] dones;
+    Object value;
+    int majority;
 
-
+    //define Instance for paxos
+    private class Instance{
+    	int LargestNp;
+    	int LargestNa;
+    	State state;
+    	Object value;
+    	public Instance() {
+    		this.LargestNp = Integer.MIN_VALUE;
+    		this.LargestNa = Integer.MIN_VALUE;
+    		this.state = State.Pending;
+    		this.value = null;
+    	}
+    }
+    
+    //get Instance with a given seqence number
+    private Instance getInstance(int seq) {
+    	mutex.lock();
+    	if(!instances.containsKey(seq)) {
+    		Instance instance = new Instance();
+    		instances.put(seq, instance);
+    	}
+    	mutex.unlock();
+    	return instances.get(seq);
+    	
+    }
+    
     /**
      * Call the constructor to create a Paxos peer.
      * The hostnames of all the Paxos peers (including this one)
@@ -39,8 +75,11 @@ public class Paxos implements PaxosRMI, Runnable{
         this.unreliable = new AtomicBoolean(false);
 
         // Your initialization code here
-
-
+        int seq = -1;
+        this.instances = new ConcurrentHashMap<Integer, Instance>();
+        Arrays.fill(this.dones, -1);
+        this.value = null;
+        this.majority = this.peers.length/2 + 1;
         // register peers, do not modify this part
         try{
             System.setProperty("java.rmi.server.hostname", this.peers[this.me]);
@@ -107,11 +146,66 @@ public class Paxos implements PaxosRMI, Runnable{
      */
     public void Start(int seq, Object value){
         // Your code here
+    	this.seq = seq;
+    	this.value = value;
+    	
+    	Thread t = new Thread(this);
+    	t.start();
     }
 
     @Override
     public void run(){
         //Your code here
+    	if(this.seq < this.Min()) return;
+    	while(this.getInstance(this.seq).state != State.Decided) {
+    		// proposer is trying to propose a value and get majority accept
+    		Response proposalResponse =  sendProposal(this.seq, this.value);
+    		
+    		if (proposalResponse.Majority == true) {
+    			// if majority of accepters have accepted the proposed value, the proposer then sends accept request
+    			Request acceptRequest = new Request(this.seq, proposalResponse.Np, proposalResponse.v);
+    			boolean  accept_ok =  sendAccept(acceptRequest);
+    		}
+    	}
+    }
+    
+    public Response sendProposal(int seq, Object v) {
+    	Instance instance = this.getInstance(seq);
+    	Object value = v;
+    	//we need to generate an increasing proposal number
+    	int Np;
+    	int LargestNa = Integer.MIN_VALUE;;
+    	//if instance was just created, the Proposal number must be MIN_VALUE
+    	if(instance.LargestNp == Integer.MIN_VALUE) Np = this.me + 1;
+    	else {
+    		// if the Number of proposal is not equal to Min value, make sure it is increasing
+    		Np = instance.LargestNp + this.peers.length + this.me + 1;
+    	}
+    	Request prepareRequest = new Request(seq, Np, value);
+    	int countAccepted = 0;
+    	
+    	for(int i = 0; i < this.peers.length; i++) {
+    		Response prepareResponse;
+    		if(this.me == i) prepareResponse = this.Prepare(prepareRequest);
+    		else {
+    			prepareResponse = this.Call("Prepare", prepareRequest, i);
+    		}
+    		if(prepareResponse!= null && prepareResponse.AcceptedProposal == true) {
+    			countAccepted++;
+    			if(prepareResponse.Np > LargestNa) {
+    				LargestNa = prepareResponse.Np;
+    				value = prepareResponse.v;
+    			}
+    		}
+    	}
+    	Response proposalResponse = new Response();
+    	
+    	if(countAccepted >= this.majority) {
+         	proposalResponse.Majority = true;
+         	proposalResponse.Np = Np;			
+         	proposalResponse.v = value;	
+        }
+        return proposalResponse;
     }
 
     // RMI handler
