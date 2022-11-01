@@ -41,17 +41,35 @@ public class Server implements KVPaxosRMI {
             e.printStackTrace();
         }
     }
-
-
+    //following instruction of the hw6
+    public Op wait(int seq){
+        int to = 10;
+        while(true){
+            Paxos.retStatus ret = this.px.Status(seq);
+            if(ret.state == State.Decided){
+                return Op.class.cast(ret.v);
+            }
+            try{
+                Thread.sleep(to);
+            } catch (Exception e){
+                e.printStackTrace();
+            }
+            if( to < 1000){
+                to = to * 2;
+            }
+        }
+    }
+    
     // RMI handlers
     public Response Get(Request req){
         // Your code here
+    	return null;
 
     }
 
     public Response Put(Request req){
         // Your code here
-
+    	return null;
     }
 
 

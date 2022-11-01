@@ -51,11 +51,13 @@ public class Client {
     // RMI handlers
     public Integer Get(String key){
         // Your code here
+    	return -1;
 
     }
 
     public boolean Put(String key, Integer value){
         // Your code here
+    	return false;
     }
 
 }

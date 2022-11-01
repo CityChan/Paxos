@@ -11,30 +11,23 @@ public class Request implements Serializable {
     static final long serialVersionUID=1L;
     // Your data here
     public int seq; // sequence number of instance sending the request
-    public int Np; //proposal number 
+    public int n; //proposal number 
     public Object v; // value of the proposal
-    public int done;  // the proposal was accepted after a sequence number
+    public int done_on;  // the proposal was accepted after a sequence number
     public int me;  //index of instance sending the request
 
     // Your constructor and methods here
     public Request() {
     	this.seq = -1;
-    	this.Np = Integer.MIN_VALUE;
+    	this.n = -1;
     	this.v = null;
-    	this.done = -1;
+    	this.done_on = -1;
     }
-    
-    public Request(int seq, int proposalNum, Object v) {
-    	this.seq = seq;
-    	this.Np = proposalNum;
-    	this.v = v;
-    }
-    
     public Request(int seq, int proposalNum, Object v, int done, int me) {
     	this.seq = seq;
-    	this.Np = Integer.MIN_VALUE;
+    	this.n = proposalNum;
     	this.v = v;
-    	this.done = done;
+    	this.done_on = done;
     	this.me = me;
     }
 }

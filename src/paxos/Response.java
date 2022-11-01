@@ -9,24 +9,21 @@ import java.io.Serializable;
 public class Response implements Serializable {
     static final long serialVersionUID=2L;
     // your data here
-    public int seq;
-    public Object v;
-    public int Np;
-    public boolean AcceptedProposal = false;
-    public boolean AcceptedAccept = false;
-    public boolean Majority = false;
+    public int n;
+    public int n_a;
+    public Object v_a;
 
 
     // Your constructor and methods here
     public Response() {
-    	this.seq = -1;
-    	this.v = null;
-    	this.Np = Integer.MIN_VALUE;
+    	this.n = -1;;
+    	this.n_a = -1;
+    	this.v_a = null;
     }
     
-    public Response(int seq, Object v, int Np) {
-    	this.seq = seq;
-    	this.v = v;
-    	this.Np = Np;
+    public Response(int n, int n_a, Object v_a) {
+    	this.n = n;
+    	this.n_a = n_a;
+    	this.v_a = v_a;
     }
 }
