@@ -13,7 +13,7 @@ public class Request implements Serializable {
     public int seq; // sequence number of instance sending the request
     public int n; //proposal number 
     public Object v; // value of the proposal
-    public int done_on;  // the proposal was accepted after a sequence number
+    public int done;  // the proposal was accepted after a sequence number
     public int me;  //index of instance sending the request
 
     // Your constructor and methods here
@@ -21,13 +21,13 @@ public class Request implements Serializable {
     	this.seq = -1;
     	this.n = -1;
     	this.v = null;
-    	this.done_on = -1;
+    	this.done = -1;
     }
     public Request(int seq, int proposalNum, Object v, int done, int me) {
     	this.seq = seq;
     	this.n = proposalNum;
     	this.v = v;
-    	this.done_on = done;
+    	this.done = done;
     	this.me = me;
     }
 }

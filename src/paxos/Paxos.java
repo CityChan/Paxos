@@ -2,9 +2,14 @@ package paxos;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.server.UnicastRemoteObject;
 import java.rmi.registry.Registry;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
+
+import paxos.Paxos.Instance;
+import paxos.Paxos.retStatus;
 
 /**
  * This class is the main class you need to implement paxos instances.
@@ -23,32 +28,30 @@ public class Paxos implements PaxosRMI, Runnable{
     AtomicBoolean unreliable;// for testing
 
     // Your data here
-    public class Instance{
-    	public int n_promised;
-    	public int n_accepted;
-    	public Object v_accepted;
-    	public State state;
-    	public Instance() {
-    		this.n_promised = -1;
-    		this.n_accepted = -1;
-    		this.v_accepted = null;
-    		this.state = State.Pending;
-    	}
+    public class ProposalInstance {
+        public int n_promised;
+        public int n_accepted;
+        public Object v_accepted;
+        public State state;
+
+        public ProposalInstance(){
+            this.n_promised = -1;
+            this.n_accepted = -1;
+            this.v_accepted = null;
+            this.state = State.Pending;
+        }
     }
-    //record instances with different sequence numbers
-    HashMap<Integer, Instance> instances;
-    //peers complete jobs on one sequence
-    int[] dones_on;
-    //number of peers
+
     int peers_num;
-    // number of majority
     int majority;
-    //current sequence number
+
+    HashMap<Integer, ProposalInstance> Prop_instances;
+
     int seq;
-    //if the current instance has done
-    int done_on;
-    //value proposed by current instance
     Object v_proposed;
+
+    int done;
+    int[] dones;
 
     /**
      * Call the constructor to create a Paxos peer.
@@ -65,15 +68,15 @@ public class Paxos implements PaxosRMI, Runnable{
         this.unreliable = new AtomicBoolean(false);
 
         // Your initialization code here
-        this.instances = new HashMap<>();
-        this.peers_num = peers.length;
-        this.majority = peers_num/2 + 1;
-        this.dones_on = new int[peers_num];
-        for(int i = 0; i < peers_num; i++) dones_on[i] = -1;
-        this.seq = -1;
-        this.done_on = -1;
-        this.v_proposed = null;
-
+        peers_num = peers.length;
+        majority = (peers_num /2) + 1;
+        Prop_instances = new HashMap<Integer, ProposalInstance>();
+        seq = -1;
+        v_proposed = null;
+        done = -1;
+        dones = new int[peers_num];
+        for (int i = 0; i<peers_num; i++)
+        	dones[i] = -1;
         // register peers, do not modify this part
         try{
             System.setProperty("java.rmi.server.hostname", this.peers[this.me]);
@@ -139,155 +142,176 @@ public class Paxos implements PaxosRMI, Runnable{
      * is reached.
      */
     public void Start(int seq, Object value){
-        // Your code here
-    	this.mutex.lock();
-    	try {
-    		if(seq < this.Min()) {
-        		return;
-        	}
-    		this.seq = seq;
-    		this.v_proposed = value;
-    	}finally {
-    		this.mutex.unlock();
-    	}
-    	Thread t = new Thread(this);
-    	t.start();
+        mutex.lock();
+        try {
+            if (seq < this.Min()) {
+                return;
+            }
+            this.seq = seq;
+            this.v_proposed = value;
+        } finally {
+            mutex.unlock();
+        }
+        Thread t = new Thread(this);
+        t.start();
     }
 
     @Override
     public void run(){
-        //Your code here
-    	int max_n_seen = -1;
-    	int n_proposed;
-    	Instance instance = instances.get(this.seq);
-    	while (instance != null && instance.state == State.Decided) {
-    		n_proposed = max_n_seen + 1;
-    		max_n_seen++;
-    		
-    		//Propose Stage
-    		Response[] responses = new Response[this.peers_num];
+    	// get all the input from this instance
+        int n_proposed;
+        int seq = this.seq;
+        int max_n_seen = -1;
+
+        while (true) {
+            mutex.lock();
+            try {
+            	// if the instances all have decided, return
+                if (Prop_instances.get(seq) != null && Prop_instances.get(seq).state == State.Decided )
+                    break;
+            }finally {
+                mutex.unlock();
+            }
+            // proposal number must be larger than any number it saw
+            n_proposed = max_n_seen+1;
+            // max_n_seen now is n_proposed, so ++
+            max_n_seen++;
+
+            // Propose Stage
+            Response[] responses = new Response[peers_num];
     		//prepare does not need to give value
-    		Request prepareRequest = new Request(this.seq, n_proposed, null, this.done_on, this.me);
-    		 for (int i = 0; i < peers_num; i++) {
-    			 if(this.me == i) responses[i] = this.Prepare(prepareRequest);
-    			 else {
-    				 responses[i] = this.Call("Prepare",prepareRequest,i);
-    			 }
-    		 }
-    		 int max_n_a = -1;
-    		 int count_promises = 0;
-    		 Object v_a = null;
-    		 Object v_prime = null;
-    		 for (Response response : responses) {
-    			 if(response!= null) {
-    				 max_n_seen = Math.max(max_n_seen, response.n_a);
-    				 // if the proposal was promised
-    				 if(response.n == n_proposed) {
-    					 count_promises++;
-    					 //update the max n_a seen and 
-    					 if(response.n_a > max_n_a) {
-    						 max_n_a = response.n_a;
-    						 v_a = response.v_a;
-    					 }
-    				 }
-    			 }
-    		 }
-    		 if(count_promises < this.majority) continue;
-    		 
-    		 if(v_a != null) v_prime = v_a;
-			 else {
-				 v_prime = this.v_proposed;
-			 }
-    		 
-    		 
-    		 //Accept Stage
-    		 Request acceptRequest = new Request(this.seq, n_proposed, v_prime, this.done_on, this.me);
-    		 for (int i = 0; i < peers_num; i++) {
-    			 if(this.me == i) responses[i] = this.Accept(acceptRequest);
-    			 else {
-    				 responses[i] = this.Call("Accpet",acceptRequest,i);
-    			 }
-    		 }
-    		 int count_accepts = 0;
-    		 for (Response response : responses) {
-    			 if(response!= null) {
-    				 // if the proposal was accepted
-    				 if(response.n == n_proposed) {
-    					 count_accepts++;    					 
-    				 }
-    			 }
-    		 }
-    		 if(count_accepts < this.majority) continue;
-    		 
-    		 
-    		 //Decide Stage
-    		 Request decideRequest = new Request(this.seq, n_proposed, v_prime,  this.done_on, this.me);
-    		 for (int i = 0; i < peers_num; i++) {
-    			 if(this.me == i) responses[i] = this.Decide(decideRequest);
-    			 else {
-    				 responses[i] = this.Call("Decide",decideRequest,i);
-    			 }
-    		 }
-    	}
+            Request prepareRequest = new Request(seq, n_proposed, null, this.done, me);
+            for (int i = 0; i < peers_num; i++) {
+                if (me == i)
+                	//if i == me, dont need to call Call() function
+                	responses[i] = this.Prepare(prepareRequest);
+                else
+                	responses[i] = this.Call("Prepare", prepareRequest, i);            
+            }
+
+            int max_n_a = -1;
+            //counter for the number of promises from accepters
+            int count_promises = 0;
+            Object v_a = null;
+            Object v_prime = null;
+            
+            for (Response response : responses) {
+            	if(response!= null) {
+            		max_n_seen = Math.max(max_n_seen, response.n_a);
+            		//if the response return the same number of proposal number, means
+            		//the accepter accept the proposal, see in Prepare()
+            		if (response.n == n_proposed) {
+                    	count_promises++;
+   					    //update the max n_a seen and value accepted
+                        if (response.n_a > max_n_a) {
+                            max_n_a = response.n_a;
+                            v_a = response.v_a;
+                        }
+                    }
+            	}
+            }
+            
+            // if the number of promises are not sufficient, keep running the loop and
+            // no need to move to the next step, Accept
+            if (count_promises < majority) continue;
+
+            	
+            if(v_a != null) v_prime = v_a;
+            else v_prime = this.v_proposed;
+            
+   		 	//Accept Stage
+            Request acceptRequest = new Request(seq, n_proposed, v_prime, this.done, me);
+            for (int i = 0; i < peers_num; i++) {
+                if (me == i)
+                	responses[i] = this.Accept(acceptRequest);
+                else
+                	responses[i] = this.Call("Accept", acceptRequest, i);
+                    
+            }
+            int count_accepts = 0;
+            for (Response response : responses) {
+            	if(response!= null) {
+   				    // if the proposal was accepted
+   				 	if(response.n == n_proposed) count_accepts++;    					 
+   			 	}
+            }
+
+            if (count_accepts < majority) continue;
+
+   		 	//Decide Stage
+            Request decideRequest = new Request(seq, n_proposed, v_prime, this.done, me);
+            for (int i = 0; i < peers_num; i++) {
+                if (me == i)
+                	responses[i] = this.Decide(decideRequest);
+                else
+                	responses[i] = this.Call("Decide", decideRequest, i);
+            }
+        }
     }
 
     // RMI handler
     public Response Prepare(Request req){
-        // your code here
-    	this.mutex.lock();
-    	try {
-    		if(!instances.containsKey(req.seq)) instances.put(req.seq, new Instance());
-    		Instance instance = instances.get(req.seq);
+        mutex.lock();
+        try {
+        	if(!Prop_instances.containsKey(req.seq)) 
+        		Prop_instances.put(req.seq, new ProposalInstance());
+        	
     		//synchronize this.Dones[] from the request
-    		this.dones_on[req.me] = req.done_on;
-    		if(req.n > instance.n_promised) {
-    			instance.n_promised = req.n;
-    			return new Response(req.n, instance.n_accepted,instance.v_accepted);
-    		}
-    		else {
-    			return new Response(-1, -1,null);
-    		}
-    	}finally {
-    		this.mutex.unlock();
-    	}
+            dones[req.me] = req.done;
+            ProposalInstance instance = Prop_instances.get(req.seq);
+            if (req.n > instance.n_promised) {
+            	instance.n_promised = req.n;
+                return new Response(req.n, instance.n_accepted, instance.v_accepted);
+            }else{
+                return new Response(-1, -1, null);
+            }
+        }finally {
+            mutex.unlock();
+        }
     }
 
     public Response Accept(Request req){
-        // your code here
-    	this.mutex.lock();
-    	try {
-    		if(!instances.containsKey(req.seq)) instances.put(req.seq, new Instance());
-    		Instance instance = instances.get(req.seq);
+        mutex.lock();
+        try {
+        	if(!Prop_instances.containsKey(req.seq)) 
+        		Prop_instances.put(req.seq, new ProposalInstance());
+        	
+            ProposalInstance instance = Prop_instances.get(req.seq);
+            
     		//synchronize this.Dones[] from the request
-    		this.dones_on[req.me] = req.done_on;
-    		if(req.n >= instance.n_promised) {
-    			instance.n_promised = req.n;
-    			instance.n_accepted = req.n;
-    			instance.v_accepted = req.v;
-    			return new Response(req.n, instance.n_accepted,instance.v_accepted);
-    		}
-    		else {
-    			return new Response(-1, -1, null);
-    		}
-    	}finally {
-    		this.mutex.unlock();
-    	}
+            dones[req.me] = req.done;
+            
+            if (req.n >= instance.n_promised) {
+            	instance.n_promised = req.n;
+            	instance.n_accepted = req.n;
+            	instance.v_accepted = req.v;
+                return new Response(req.n, instance.n_accepted, instance.v_accepted);
+            }else{
+                return new Response(-1, -1, null);
+            }
+        }finally {
+            mutex.unlock();
+        }
+
     }
 
     public Response Decide(Request req){
-        // your code here
-    	this.mutex.lock();
-    	try {
-    		if(!instances.containsKey(req.seq)) instances.put(req.seq, new Instance());
-    		Instance instance = instances.get(req.seq);
-    		this.dones_on[req.me] = req.done_on;
-    		instance.state = State.Decided;
-    		instance.v_accepted = req.v;
-    	}finally {
-    		this.mutex.unlock();
-    	}
-		return new Response(req.n, instance.n_accepted, instance.v_accepted);
-
+        mutex.lock();
+        try {
+        	if(!Prop_instances.containsKey(req.seq)) 
+        		Prop_instances.put(req.seq, new ProposalInstance());
+        	
+            ProposalInstance instance = Prop_instances.get(req.seq);
+            
+    		//synchronize this.Dones[] from the request
+            dones[req.me] = req.done;
+            
+            instance.state = State.Decided;
+            instance.v_accepted = req.v;
+            return new Response(req.n, instance.n_accepted, instance.v_accepted);
+        }finally {
+            mutex.unlock();
+        }
     }
 
     /**
@@ -297,13 +321,12 @@ public class Paxos implements PaxosRMI, Runnable{
      * see the comments for Min() for more explanation.
      */
     public void Done(int seq) {
-        // Your code here
-    	this.mutex.lock();
-         try {
-             this.done_on = Math.max(this.done_on, this.seq);
-         }finally {
-        	 this.mutex.unlock();
-         }
+        mutex.lock();
+        try {
+            done = Math.max(this.done, seq);
+        }finally {
+            mutex.unlock();
+        }
     }
 
 
@@ -313,17 +336,16 @@ public class Paxos implements PaxosRMI, Runnable{
      * this peer.
      */
     public int Max(){
-        // Your code here
     	int max = Integer.MIN_VALUE;
-    	 this.mutex.lock();
-         try {
-        	 for(Integer key : this.instances.keySet()) {
-        		 max = key > max? key : max;
-        	 }
-         }finally {
-        	 this.mutex.unlock();
-         }
-         return max;
+   	 this.mutex.lock();
+        try {
+       	 for(Integer key : this.Prop_instances.keySet()) {
+       		 max = key > max? key : max;
+       	 }
+        }finally {
+       	 this.mutex.unlock();
+        }
+        return max;
     }
 
     /**
@@ -355,17 +377,16 @@ public class Paxos implements PaxosRMI, Runnable{
      * instances.
      */
     public int Min(){
-        // Your code here
     	int min = Integer.MAX_VALUE;
     	this.mutex.lock();
     	try {
-    		for(Integer done_on : this.dones_on) {
+    		for(Integer done_on : this.dones) {
     			min = done_on < min? done_on : min;
     		}
     		
     		//for long-term running, release memeory
-    		for(Integer key : this.instances.keySet()) {
-    			if(key <= min) this.instances.get(key).state = State.Forgotten;
+    		for(Integer key : this.Prop_instances.keySet()) {
+    			if(key <= min) this.Prop_instances.get(key).state = State.Forgotten;
     		}
     	}finally {
     		this.mutex.unlock();
@@ -387,7 +408,7 @@ public class Paxos implements PaxosRMI, Runnable{
         // Your code here
     	this.mutex.lock();
     	try {
-    		Instance instance = this.instances.get(seq);
+    		ProposalInstance instance = this.Prop_instances.get(seq);
     		if(instance == null) return new retStatus(State.Pending, null);
     		else {
     			return new retStatus(instance.state, instance.v_accepted);

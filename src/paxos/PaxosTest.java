@@ -163,7 +163,7 @@ public class PaxosTest {
 
     }
 
-    //@Test
+    @Test
     public void TestForget(){
 
         final int npaxos = 6;
