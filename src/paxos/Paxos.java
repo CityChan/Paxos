@@ -8,9 +8,6 @@ import java.util.HashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 
-import paxos.Paxos.Instance;
-import paxos.Paxos.retStatus;
-
 /**
  * This class is the main class you need to implement paxos instances.
  */
@@ -48,7 +45,7 @@ public class Paxos implements PaxosRMI, Runnable{
     HashMap<Integer, ProposalInstance> Prop_instances;
 
     int seq;
-    Object v_proposed;
+    Object proposed_value;
 
     int done;
     int[] dones;
@@ -72,11 +69,12 @@ public class Paxos implements PaxosRMI, Runnable{
         majority = (peers_num /2) + 1;
         Prop_instances = new HashMap<Integer, ProposalInstance>();
         seq = -1;
-        v_proposed = null;
+        proposed_value = null;
         done = -1;
         dones = new int[peers_num];
         for (int i = 0; i<peers_num; i++)
         	dones[i] = -1;
+
         // register peers, do not modify this part
         try{
             System.setProperty("java.rmi.server.hostname", this.peers[this.me]);
@@ -144,11 +142,11 @@ public class Paxos implements PaxosRMI, Runnable{
     public void Start(int seq, Object value){
         mutex.lock();
         try {
-            if (seq < this.Min()) {
+            if (seq < Min()) {
                 return;
             }
             this.seq = seq;
-            this.v_proposed = value;
+            this.proposed_value = value;
         } finally {
             mutex.unlock();
         }
@@ -158,49 +156,44 @@ public class Paxos implements PaxosRMI, Runnable{
 
     @Override
     public void run(){
-    	// get all the input from this instance
-        int n_proposed;
-        int seq = this.seq;
+        int proposal_n;
         int max_n_seen = -1;
+        int seq = this.seq;
 
         while (true) {
             mutex.lock();
             try {
-            	// if the instances all have decided, return
                 if (Prop_instances.get(seq) != null && Prop_instances.get(seq).state == State.Decided )
                     break;
             }finally {
                 mutex.unlock();
             }
-            // proposal number must be larger than any number it saw
-            n_proposed = max_n_seen+1;
-            // max_n_seen now is n_proposed, so ++
+
+            proposal_n = max_n_seen+1;
             max_n_seen++;
 
             // Propose Stage
             Response[] responses = new Response[peers_num];
-    		//prepare does not need to give value
-            Request prepareRequest = new Request(seq, n_proposed, null, this.done, me);
+            Request prepareRequest = new Request(seq, proposal_n, null, this.done, me);
             for (int i = 0; i < peers_num; i++) {
                 if (me == i)
                 	//if i == me, dont need to call Call() function
-                	responses[i] = this.Prepare(prepareRequest);
+                	responses[i] = Prepare(prepareRequest);
                 else
-                	responses[i] = this.Call("Prepare", prepareRequest, i);            
+                	responses[i] = Call("Prepare", prepareRequest, i);            
             }
 
             int max_n_a = -1;
             //counter for the number of promises from accepters
-            int count_promises = 0;
+            int count_promises  = 0;
             Object v_a = null;
             Object v_prime = null;
-            
             for (Response response : responses) {
             	if(response!= null) {
             		max_n_seen = Math.max(max_n_seen, response.n_a);
             		//if the response return the same number of proposal number, means
             		//the accepter accept the proposal, see in Prepare()
-            		if (response.n == n_proposed) {
+            		if (response.n == proposal_n) {
                     	count_promises++;
    					    //update the max n_a seen and value accepted
                         if (response.n_a > max_n_a) {
@@ -210,41 +203,41 @@ public class Paxos implements PaxosRMI, Runnable{
                     }
             	}
             }
-            
+
             // if the number of promises are not sufficient, keep running the loop and
             // no need to move to the next step, Accept
             if (count_promises < majority) continue;
 
-            	
             if(v_a != null) v_prime = v_a;
-            else v_prime = this.v_proposed;
+            else v_prime = this.proposed_value;
             
    		 	//Accept Stage
-            Request acceptRequest = new Request(seq, n_proposed, v_prime, this.done, me);
+            Request acceptRequest = new Request(seq, proposal_n, v_prime, this.done, me);
             for (int i = 0; i < peers_num; i++) {
                 if (me == i)
-                	responses[i] = this.Accept(acceptRequest);
+                	responses[i] = Accept(acceptRequest);
                 else
-                	responses[i] = this.Call("Accept", acceptRequest, i);
+                	responses[i] = Call("Accept", acceptRequest, i);
                     
             }
-            int count_accepts = 0;
+            
+            int count_accepts  = 0;
             for (Response response : responses) {
             	if(response!= null) {
    				    // if the proposal was accepted
-   				 	if(response.n == n_proposed) count_accepts++;    					 
+   				 	if(response.n == proposal_n) count_accepts++;    					 
    			 	}
             }
 
             if (count_accepts < majority) continue;
 
-   		 	//Decide Stage
-            Request decideRequest = new Request(seq, n_proposed, v_prime, this.done, me);
+           //Decide Stage
+            Request decideRequest = new Request(seq, proposal_n, v_prime, this.done, me);
             for (int i = 0; i < peers_num; i++) {
                 if (me == i)
-                	responses[i] = this.Decide(decideRequest);
+                	responses[i] = Decide(decideRequest);
                 else
-                	responses[i] = this.Call("Decide", decideRequest, i);
+                	responses[i] = Call("Decide", decideRequest, i);
             }
         }
     }
@@ -279,9 +272,8 @@ public class Paxos implements PaxosRMI, Runnable{
             ProposalInstance instance = Prop_instances.get(req.seq);
             
     		//synchronize this.Dones[] from the request
-            dones[req.me] = req.done;
-            
-            if (req.n >= instance.n_promised) {
+        	dones[req.me] = req.done;
+            if (req.n >= Prop_instances.get(req.seq).n_promised) {
             	instance.n_promised = req.n;
             	instance.n_accepted = req.n;
             	instance.v_accepted = req.v;
@@ -293,7 +285,7 @@ public class Paxos implements PaxosRMI, Runnable{
             mutex.unlock();
         }
 
-    }
+  }
 
     public Response Decide(Request req){
         mutex.lock();
@@ -304,14 +296,15 @@ public class Paxos implements PaxosRMI, Runnable{
             ProposalInstance instance = Prop_instances.get(req.seq);
             
     		//synchronize this.Dones[] from the request
-            dones[req.me] = req.done;
+        	dones[req.me] = req.done;
+            Prop_instances.get(req.seq).state = State.Decided;
+            Prop_instances.get(req.seq).v_accepted = req.v;
             
-            instance.state = State.Decided;
-            instance.v_accepted = req.v;
             return new Response(req.n, instance.n_accepted, instance.v_accepted);
         }finally {
             mutex.unlock();
         }
+       
     }
 
     /**
@@ -323,7 +316,7 @@ public class Paxos implements PaxosRMI, Runnable{
     public void Done(int seq) {
         mutex.lock();
         try {
-            done = Math.max(this.done, seq);
+        	done = Math.max(done, seq);
         }finally {
             mutex.unlock();
         }
@@ -336,14 +329,13 @@ public class Paxos implements PaxosRMI, Runnable{
      * this peer.
      */
     public int Max(){
-    	int max = Integer.MIN_VALUE;
-   	 this.mutex.lock();
+        int max = Integer.MIN_VALUE;
+        mutex.lock();
         try {
-       	 for(Integer key : this.Prop_instances.keySet()) {
-       		 max = key > max? key : max;
-       	 }
+            if (Prop_instances.isEmpty()) return -1;
+            max = Collections.max(Prop_instances.keySet());
         }finally {
-       	 this.mutex.unlock();
+            mutex.unlock();
         }
         return max;
     }
@@ -406,7 +398,8 @@ public class Paxos implements PaxosRMI, Runnable{
      */
     public retStatus Status(int seq){
         // Your code here
-    	this.mutex.lock();
+        this.Min();
+        this.mutex.lock();
     	try {
     		ProposalInstance instance = this.Prop_instances.get(seq);
     		if(instance == null) return new retStatus(State.Pending, null);

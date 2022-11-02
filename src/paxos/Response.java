@@ -15,15 +15,9 @@ public class Response implements Serializable {
 
 
     // Your constructor and methods here
-    public Response() {
-    	this.n = -1;;
-    	this.n_a = -1;
-    	this.v_a = null;
-    }
-    
-    public Response(int n, int n_a, Object v_a) {
-    	this.n = n;
-    	this.n_a = n_a;
-    	this.v_a = v_a;
+    public Response(int n_, int n_a_, Object v_a_){
+        n = n_;
+        n_a = n_a_;
+        v_a = v_a_;
     }
 }

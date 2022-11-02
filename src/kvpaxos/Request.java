@@ -9,14 +9,11 @@ import java.io.Serializable;
 public class Request implements Serializable {
     static final long serialVersionUID=11L;
     // Your data here
-    public String key;
-    public Integer value;
-    public Integer seq;
+    Op operation;
 
-    // Your constructor and methods here  
-    public Request(String key, int value,int seq) {
-    	this.key = key;
-    	this.value = value;
-    	this.seq = seq;
+    // Your constructor and methods here
+
+    public Request(String op, int ClientSeq, String key, Integer value) {
+        this.operation = new Op(op, ClientSeq, key, value);
     }
 }

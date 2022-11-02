@@ -9,12 +9,13 @@ public class Client {
     int[] ports;
 
     // Your data here
-
+    int ClientSeq;
 
     public Client(String[] servers, int[] ports){
         this.servers = servers;
         this.ports = ports;
         // Your initialization code here
+        this.ClientSeq = 0;
     }
 
     /**
@@ -51,13 +52,38 @@ public class Client {
     // RMI handlers
     public Integer Get(String key){
         // Your code here
-    	return -1;
-
+    	Request GetRequest = new Request("Get", this.ClientSeq++, key, (Integer) null);
+    	//keep sending get request until get the value
+    	while(true) {
+    		for(int i = 0; i < this.servers.length; i++) {
+    			Response GetResponse = this.Call("Get",GetRequest, i);
+    			if(GetResponse!= null) return (Integer) GetResponse.value;
+    		}
+    		//wait for servers to get consensus
+    		try {
+                Thread.sleep(100);
+            } catch (Exception exception) {
+                exception.printStackTrace();
+            }
+    	}
     }
 
     public boolean Put(String key, Integer value){
         // Your code here
-    	return false;
+    	Request PutRequest = new Request("Put", this.ClientSeq++, key,  value);
+    	//keep sending get request until get the value
+    	while(true) {
+    		for(int i = 0; i < this.ports.length; i++) {
+    			Response GetResponse = this.Call("Put",PutRequest, i);
+    			if(GetResponse != null) return true;
+    		}
+    		//wait for servers to get consensus
+    		try {
+                Thread.sleep(100);
+            } catch (Exception exception) {
+                exception.printStackTrace();
+            }
+    	}
     }
 
 }
